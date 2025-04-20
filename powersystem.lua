@@ -79,13 +79,11 @@ function Link:new(parentRelay, childRelays, powerConsumption, initialActivity)
 end
 function Link:getParentRelayState()
     local sides = {"top", "bottom", "left", "right", "front", "back"}
-    --for _, link in ipairs(Link.instances) do
-            for _, side in ipairs(sides) do
-            if self.parentRelay.getInput(side) then
-                return true
-            end
+        for _, side in ipairs(sides) do
+        if self.parentRelay.getInput(side) then
+            return true
         end
-    --end
+    end
     return false
 end
 function Link.updateChildRelayStates()
@@ -208,7 +206,7 @@ local function setup()
                 local powerConsumption = -tonumber(read())
                 sleep(1)
                 Link:new(mainRelay, nil , powerConsumption, false)
-                print("You added a new generator\n")
+                print("You added a new generator")
                 sleep(1)
             end
         end
@@ -350,7 +348,7 @@ end
 
 --drawing monitor screen stuff
 local powerconsumelevel = 0
-local powerlvlcolors = { "d", "dd", "dd4", "dd44", "dd44e", "dd44ee", "dd44eee" }
+local powerlvlcolors = { "d", "d4", "d44", "d444", "d444e", "d444ee", "d444eee" }
 local function drawScreen()
     if power <= 0 then
         monitor.setTextColor(colors.red)
@@ -362,7 +360,11 @@ local function drawScreen()
     monitor.setCursorPos(1, 1)
     monitor.write("PWR")
     monitor.setCursorPos(5, 1)
-    monitor.write(tostring(math.floor(((power / initialPower) * 100) -1 )).. "%")
+    if power > 0 then
+        monitor.write(tostring(math.ceil(((power / initialPower) * 100) -1 )).. "%")
+    else
+        monitor.write("0%")
+    end
     -- power usage level bar (=======)
     monitor.setCursorPos(1, 2)
     for _, link in ipairs(Link.instances) do
@@ -388,7 +390,7 @@ local function mainLoop()
                 celebrate6AM()
             end
             if resetPowerAt6AM then
-                power = 9999
+                power = initialPower
             end
         end
         if os.time() > 6 and debounce6AM == true then
