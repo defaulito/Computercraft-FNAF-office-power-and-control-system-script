@@ -2,27 +2,25 @@
 local monitor = peripheral.find("monitor")
 local speaker = peripheral.find("speaker") or nil
 local doSetup = false
-local configPath = "config.lua"
-
+local configPath = "config.lua" -- where to save config after setting up, only edit if you need to
 --CONFIG VARIABLES
 local fullPowerDuringDay = false
 local do6AMCelebration = false
 local resetPowerAt6AM = false
+local initialPower = 9999
 --
-
 term.clear()
-term.setCursorPos(0,0)
+term.setCursorPos(1,1)
 monitor.setBackgroundColor(colors.black)
 monitor.clear()
-
---On-monitor buttons
-local Button = {}
+--on-monitor buttons
+local Button = {} --button class, Yes, object oriented programming in lua, lets gooo
 Button.__index = Button
 Button.instances = {}
 function Button:new(x, y, xTOff, yTOff, width, height, text)
     if text ~= nil then
         assert(#text + xTOff <= width, "text is wider than the button, consider using acronyms (ex: DOR for door), or decreasing x text offset if present")
-        assert(yTOff < height, "y text offset is too large")
+        assert(yTOff < height, "y text offset is too large, decrease or remove it")
     end
 
     local obj = {x = x, y = y, xTOff=xTOff, yTOff=yTOff, width = width, height = height, active = false, text = text or nil}
@@ -67,8 +65,8 @@ local function handleInput()
         Button:awaitClick()
     end
 end
-
-local Link = {}
+--a "link" is just a fancy name in the code for devices and their levers or whatever controls them
+local Link = {} --link class
 Link.instances = {}
 function Link:new(parentRelay, childRelays, powerConsumption, initialActivity)
     local obj = {parentRelay = parentRelay or nil, childRelays = childRelays or nil, powerConsumption = powerConsumption, initialActivity = initialActivity, active = initialActivity}
@@ -98,11 +96,10 @@ function Link.updateChildRelayStates()
         end
     end
 end
-
+--setup function
 local function setup()
     local userInput
-    print("\nINITIAL SETUP")
-
+    print("INITIAL SETUP")
     print("\nDo you want power to automatically reset at 6AM?\n | Yes | No |")
     userInput = read()
     if userInput:upper() == "YES" then
@@ -161,7 +158,7 @@ local function setup()
                         table.insert(connectedTargets, peripheral.wrap(p1))
                     end
                 end
-                print("\nHow much power will it consume?")
+                print("\nHow much power will it consume per in-game tick? 1 second = 20 in-game ticks")
                 sleep(1)
                 local powerConsumption = tonumber(read())
                 Link:new(mainRelay, connectedTargets or nil, powerConsumption, false)
@@ -177,7 +174,7 @@ local function setup()
                     local connectingTargets = true
                     while connectingTargets do
                         print("\nWaiting for a relay...\n | (D)one |")
-                        local event, p1, p2, p3 = os.pullEvent()
+                        event, p1, p2, p3 = os.pullEvent()
                         if event == "key" then
                             if keys.getName(p1):upper() == "D" then
                                 print("Done")
@@ -188,11 +185,11 @@ local function setup()
                             table.insert(connectedTargets, peripheral.wrap(p1))
                         end
                     end
-                elseif userInput.upper == "NO" then
+                elseif userInput:upper() == "NO" then
                 end
                 table.insert(connectedTargets, mainRelay)
                 sleep(1)
-                print("\nHow much power will it consume?")
+                print("\nHow much power will it consume per in-game tick? 1 second = 20 in-game ticks")
                 local powerConsumption = tonumber(read())
                 sleep(1)
                 Link:new(nil, connectedTargets, powerConsumption, true)
@@ -201,7 +198,7 @@ local function setup()
             elseif userInput:upper() == "GENERATOR" then
                 print("You connected a generator\n")
                 sleep(1)
-                print("How much power will it generate?")
+                print("How much power will it generate per in-game tick? 1 second = 20 in-game ticks")
                 sleep(1)
                 local powerConsumption = -tonumber(read())
                 sleep(1)
@@ -211,7 +208,7 @@ local function setup()
             end
         end
     end
-
+    --saving config to a file
     local config = {}
     config.resetPowerAt6AM = resetPowerAt6AM
     config.fullPowerDuringDay = fullPowerDuringDay
@@ -233,14 +230,14 @@ local function setup()
         currentLink.powerConsumption = link.powerConsumption
         currentLink.initialActivity = link.initialActivity
         table.insert(config.links, currentLink)
-        local file = fs.open(configPath, "w")
-        file.write("return " .. textutils.serialize(config))
-        file.close()
     end
+    local file = fs.open(configPath, "w")
+    file.write("return " .. textutils.serialize(config))
+    file.close()
     print("Config saved to " .. configPath)
-    print("\nSetup is done, you will not need to set up again, if you wish to reset then delete " .. configPath)
+    print("\nSetup is done, you will not need to set up again\nif you wish to reset then delete " .. configPath, ", either by stopping the code and running the delete command or going to (this world's save folder)/computercraft/computer/(computer id)")
 end
-
+-- loading config
 local function loadConfig()
     local config = dofile(configPath)
     resetPowerAt6AM = config.resetPowerAt6AM
@@ -260,16 +257,14 @@ local function loadConfig()
         end
         Link:new(parentRelay, childRelays, link.powerConsumption, link.initialActivity)
     end
-    print("\nLoaded config from " .. configPath .. ", if you wish to reset setup then delete " .. configPath)
+    print("\nLoaded config from " .. configPath .. "\nif you wish to reset setup then delete " .. configPath .. ", either by stopping the code and running the delete command or going to (this world's save folder)/computercraft/computer/(computer id)")
 end
-
+--check if config file exists, if it does, load it, if it doesn't, then start setup
 if fs.exists(configPath) then
     loadConfig()
 else setup()
 end
-
 --handling power
-local initialPower = 9999
 local power = initialPower
 local function handlePower()
     if power > 0 then
@@ -317,7 +312,6 @@ local function handlePower()
         power = initialPower
     end
 end
-
 --announcing 6AM on the monitor
 local function celebrate6AM()
     monitor.setTextColor(colors.white)
@@ -345,7 +339,6 @@ local function celebrate6AM()
     monitor.setBackgroundColor(colors.black)
     monitor.clear()
 end
-
 --drawing monitor screen stuff
 local powerconsumelevel = 0
 local powerlvlcolors = { "d", "d4", "d44", "d444", "d444e", "d444ee", "d444eee" }
@@ -379,7 +372,7 @@ local function drawScreen()
     -- draw buttons on the monitor (if there are buttons)
     Button:drawButtons()
 end
-
+--where it all comes together
 local debounce6AM = false
 local function mainLoop()
     while true do
@@ -403,5 +396,4 @@ local function mainLoop()
 end
 
 parallel.waitForAny(mainLoop, handleInput)
-
 -- script by defaulito
