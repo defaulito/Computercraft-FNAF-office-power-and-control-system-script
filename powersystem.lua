@@ -1,25 +1,39 @@
+-- script by defaulito
 local monitor = peripheral.find("monitor")
-local relay = peripheral.find("redstone_relay") or nil
+local speaker = peripheral.find("speaker") or nil
+local doSetup = false
+local configPath = "config.lua"
 
+--CONFIG VARIABLES
+local fullPowerDuringDay = false
+local do6AMCelebration = false
+local resetPowerAt6AM = false
+--
+
+term.clear()
+term.setCursorPos(0,0)
+monitor.setBackgroundColor(colors.black)
+monitor.clear()
+
+--On-monitor buttons
 local Button = {}
+Button.__index = Button
 Button.instances = {}
 function Button:new(x, y, xTOff, yTOff, width, height, text)
     if text ~= nil then
-        assert(#text + xTOff <= width, "text is wider than the button, consider using acronyms (ex: DOR for door), or decreasing offset if present")
+        assert(#text + xTOff <= width, "text is wider than the button, consider using acronyms (ex: DOR for door), or decreasing x text offset if present")
+        assert(yTOff < height, "y text offset is too large")
     end
-    local obj = { x = x, y = y, xTOff=xTOff, yTOff=yTOff, width = width, height = height, active = false, text = text or nil}
+
+    local obj = {x = x, y = y, xTOff=xTOff, yTOff=yTOff, width = width, height = height, active = false, text = text or nil}
     setmetatable(obj, self)
-    self.__index = self
     table.insert(self.instances, obj)
     return obj
 end
-
 function Button:draw()
     local bgcolor
-    if self.active then
-        bgcolor = "d"
-    else
-        bgcolor = "e"
+    if self.active then bgcolor = "d"
+    else bgcolor = "e"
     end
     for i = 0, self.height - 1 do
         monitor.setCursorPos(self.x, self.y + i)
@@ -30,8 +44,7 @@ function Button:draw()
         monitor.blit(self.text, string.rep("0", #self.text), string.rep(bgcolor, #self.text))
     end
 end
-
-function Button:onClick()
+function Button:awaitClick()
     local eventData = {os.pullEvent()}
     local event = eventData[1]
     if event == "monitor_touch" then
@@ -44,76 +57,270 @@ function Button:onClick()
         end
     end
 end
-
 function Button:drawButtons()
     for _, button in ipairs(Button.instances) do
         button:draw()
     end
 end
-
 local function handleInput()
     while true do
-        Button:onClick()
+        Button:awaitClick()
     end
 end
 
-local Output = {}
-Output.instances = {}
-function Output:new(side, powerconsumption, initialActivity, linkedButton)
-    local obj = {side = side, powerconsumption = powerconsumption, initialActivity = initialActivity, active = initialActivity, linkedButton = linkedButton or nil}
+local Link = {}
+Link.instances = {}
+function Link:new(parentRelay, childRelays, powerConsumption, initialActivity)
+    local obj = {parentRelay = parentRelay or nil, childRelays = childRelays or nil, powerConsumption = powerConsumption, initialActivity = initialActivity, active = initialActivity}
     setmetatable(obj, self)
     self.__index = self
     table.insert(self.instances, obj)
     return obj
 end
-
-local power = 9999
-local function handlePower()
-    for _, output in ipairs(Output.instances) do
-        if output.linkedButton ~= nil then
-            if output.linkedButton.active then
-                power = power - output.powerconsumption
-                output.active = not output.initialActivity
-            else
-                output.active = output.initialActivity
-            end
-        else
-            power = power - output.powerconsumption
-        end
-    end
-
-    if power <= 0 then
-        power = 0
-        for _, button in ipairs(Button.instances) do
-            button.active = false
-        end
-        for _, output in ipairs(Output.instances) do
-            if output.linkedButton ~= nil then
-                output.active = false
-            else
-                output.active = not output.initialActivity
+function Link:getParentRelayState()
+    local sides = {"top", "bottom", "left", "right", "front", "back"}
+    --for _, link in ipairs(Link.instances) do
+            for _, side in ipairs(sides) do
+            if self.parentRelay.getInput(side) then
+                return true
             end
         end
-    end
-
-    for _, output in ipairs(Output.instances) do
-        if relay ~= nil then
-            relay.setOutput(output.side, output.active)
-        else
-            rs.setOutput(output.side, output.active)
-        end
-    end
-
-    if os.time() >= 6 then
-        power = 9999
-        for _, output in ipairs(Output.instances) do
-            if output.linkedButton == nil then
-                output.active = output.initialActivity
+    --end
+    return false
+end
+function Link.updateChildRelayStates()
+    local sides = {"top", "bottom", "left", "right", "front", "back"}
+    for _, link in ipairs(Link.instances) do
+        if link.childRelays ~= nil then
+            for _, relay in ipairs(link.childRelays) do
+                for _, side in ipairs(sides) do
+                    relay.setOutput(side, link.active)
+                end
             end
         end
     end
 end
 
+local function setup()
+    local userInput
+    print("\nINITIAL SETUP")
+
+    print("\nDo you want power to automatically reset at 6AM?\n | Yes | No |")
+    userInput = read()
+    if userInput:upper() == "YES" then
+        resetPowerAt6AM = true
+    elseif userInput:upper() == "NO" then
+    end
+    print("\nDo you want power to stay full during daytime?\n | Yes | No |")
+    userInput = read()
+    if userInput:upper() == "YES" then
+        fullPowerDuringDay = true
+    elseif userInput:upper() == "NO" then
+    end
+    if resetPowerAt6AM == false and fullPowerDuringDay == false then
+        sleep(1)
+        print("\nPower won't reset automatically at 6AM and power won't stay full during day, keep in mind that you will need to add a generator in order to recharge power")
+        sleep(1)
+    end
+    print("\nDo you want the monitor to announce when time hits 6AM?\n | Yes | No |")
+    userInput = read()
+    if userInput:upper() == "YES" then
+        do6AMCelebration = true
+    elseif userInput:upper() == "NO" then
+    end
+    sleep(1)
+
+    doSetup = true
+    local event, p1, p2, p3
+    while doSetup do
+        print("\nConnecting a new device...")
+        print("\nWaiting for a relay...\n | (D)one to exit setup |")
+         event, p1, p2, p3 = os.pullEvent()
+        if event == "key" then
+            if keys.getName(p1):upper() == "D" then
+                print("Done")
+                doSetup = false
+            end
+        elseif event == "peripheral" then
+            local mainRelay = peripheral.wrap(p1)
+            print("\nRelay attached, what did you connect?\n | Lever | Lights | Generator |")
+            userInput = read()
+            if userInput:upper() == "LEVER" then
+                print("\nYou connected a lever, now connect the target device relay(s)")
+                sleep(1)
+                local connectingTargets = true
+                local connectedTargets = {}
+                while connectingTargets do
+                    print("\nWaiting for a relay...\n | (D)one to finish |")
+                     event, p1, p2, p3 = os.pullEvent()
+                    if event == "key" then
+                        if keys.getName(p1):upper() == "D" then
+                            print("Done")
+                            connectingTargets = false
+                        end
+                    elseif event == "peripheral" then
+                        print("\nYou attached a target")
+                        table.insert(connectedTargets, peripheral.wrap(p1))
+                    end
+                end
+                print("\nHow much power will it consume?")
+                sleep(1)
+                local powerConsumption = tonumber(read())
+                Link:new(mainRelay, connectedTargets or nil, powerConsumption, false)
+                print("\nYou added a new lever and its " .. #connectedTargets .. " target(s)")
+                sleep(1)
+            elseif userInput:upper() == "LIGHTS" then
+                local connectedTargets = {}
+                print("\nYou connected lights\n")
+                print("Do you want to add more lights?\n | Yes | No |")
+                userInput = read()
+                if userInput:upper() == "YES" then
+                    sleep(1)
+                    local connectingTargets = true
+                    while connectingTargets do
+                        print("\nWaiting for a relay...\n | (D)one |")
+                        local event, p1, p2, p3 = os.pullEvent()
+                        if event == "key" then
+                            if keys.getName(p1):upper() == "D" then
+                                print("Done")
+                                connectingTargets = false
+                            end
+                        elseif event == "peripheral" then
+                            print("\nYou attached a light")
+                            table.insert(connectedTargets, peripheral.wrap(p1))
+                        end
+                    end
+                elseif userInput.upper == "NO" then
+                end
+                table.insert(connectedTargets, mainRelay)
+                sleep(1)
+                print("\nHow much power will it consume?")
+                local powerConsumption = tonumber(read())
+                sleep(1)
+                Link:new(nil, connectedTargets, powerConsumption, true)
+                print("\nYou added " .. #connectedTargets .. " light(s)")
+                sleep(1)
+            elseif userInput:upper() == "GENERATOR" then
+                print("You connected a generator\n")
+                sleep(1)
+                print("How much power will it generate?")
+                sleep(1)
+                local powerConsumption = -tonumber(read())
+                sleep(1)
+                Link:new(mainRelay, nil , powerConsumption, false)
+                print("You added a new generator\n")
+                sleep(1)
+            end
+        end
+    end
+
+    local config = {}
+    config.resetPowerAt6AM = resetPowerAt6AM
+    config.fullPowerDuringDay = fullPowerDuringDay
+    config.do6AMCelebration = do6AMCelebration
+    config.links = {}
+    for _, link in ipairs(Link.instances) do
+        local currentLink = {}
+        currentLink.childRelays = {}
+        if link.parentRelay ~= nil then
+            currentLink.parentRelay = peripheral.getName(link.parentRelay)
+        else currentLink.parentRelay = nil
+        end
+        if link.childRelays ~= nil then
+            for _, relay in ipairs(link.childRelays) do
+            table.insert(currentLink.childRelays, peripheral.getName(relay))
+            end
+        else currentLink.childRelays = nil
+        end
+        currentLink.powerConsumption = link.powerConsumption
+        currentLink.initialActivity = link.initialActivity
+        table.insert(config.links, currentLink)
+        local file = fs.open(configPath, "w")
+        file.write("return " .. textutils.serialize(config))
+        file.close()
+    end
+    print("Config saved to " .. configPath)
+    print("\nSetup is done, you will not need to set up again, if you wish to reset then delete " .. configPath)
+end
+
+local function loadConfig()
+    local config = dofile(configPath)
+    resetPowerAt6AM = config.resetPowerAt6AM
+    fullPowerDuringDay = config.fullPowerDuringDay
+    do6AMCelebration = config.do6AMCelebration
+    for _, link in ipairs(config.links) do
+        local parentRelay = nil
+        if link.parentRelay ~= nil then
+            parentRelay = peripheral.wrap(link.parentRelay)
+        end
+        local childRelays = nil
+        if link.childRelays ~= nil then
+            childRelays = {}
+            for _, relay in ipairs(link.childRelays) do
+                table.insert(childRelays, peripheral.wrap(relay))
+            end
+        end
+        Link:new(parentRelay, childRelays, link.powerConsumption, link.initialActivity)
+    end
+    print("\nLoaded config from " .. configPath .. ", if you wish to reset setup then delete " .. configPath)
+end
+
+if fs.exists(configPath) then
+    loadConfig()
+else setup()
+end
+
+--handling power
+local initialPower = 9999
+local power = initialPower
+local function handlePower()
+    if power > 0 then
+        for _, link in ipairs(Link.instances) do
+            if link.parentRelay ~= nil and link.childRelays ~= nil then
+                link.active = link:getParentRelayState()
+                if link.active then
+                    power = power - link.powerConsumption
+                end
+            elseif link.parentRelay == nil then
+                link.active = link.initialActivity
+                power = power - link.powerConsumption
+            elseif link.childRelays == nil then
+                link.active = link:getParentRelayState()
+                if link.active then
+                    power = power - link.powerConsumption
+                end
+            end
+        end
+    end
+    Link.updateChildRelayStates()
+
+    if power > initialPower then
+        power = initialPower
+    end
+    if power <= 0 then
+        power = 0
+        for _, button in ipairs(Button.instances) do
+            button.active = false
+        end
+        for _, link in ipairs(Link.instances) do
+            if link.parentRelay ~= nil and link.childRelays ~= nil then
+                link.active = false
+            elseif link.parentRelay == nil then
+                link.active = not link.initialActivity
+            elseif link.childRelays == nil then
+                link.active = link:getParentRelayState()
+                if link.active then
+                    power = power - link.powerConsumption
+                end
+            end
+        end
+    end
+    if os.time() >= 6 and fullPowerDuringDay then
+        power = initialPower
+    end
+end
+
+--announcing 6AM on the monitor
 local function celebrate6AM()
     monitor.setTextColor(colors.white)
     monitor.setCursorPos(3, 1)
@@ -124,33 +331,42 @@ local function celebrate6AM()
     monitor.setBackgroundColor(colors.blue)
     monitor.clear()
     monitor.write("6AM")
-    sleep(2)
+    sleep(0.4)
     monitor.setCursorPos(1, 2)
     monitor.write("Your")
-    sleep(0.8)
+    sleep(0.4)
     monitor.setCursorPos(1, 3)
     monitor.write("shift")
-    sleep(0.8)
+    sleep(0.4)
     monitor.setCursorPos(1, 4)
     monitor.write("is")
-    sleep(0.8)
-    monitor.setCursorPos(1,5)
+    sleep(0.4)
+    monitor.setCursorPos(1, 5)
     monitor.write("over!")
-    sleep(6)
+    sleep(5)
     monitor.setBackgroundColor(colors.black)
     monitor.clear()
 end
 
+--drawing monitor screen stuff
 local powerconsumelevel = 0
-local powerlvlcolors = { "d", "d4", "d44", "d44e", "d44ee", "d44eee", "d44eeee" }
+local powerlvlcolors = { "d", "dd", "dd4", "dd44", "dd44e", "dd44ee", "dd44eee" }
 local function drawScreen()
+    if power <= 0 then
+        monitor.setTextColor(colors.red)
+        powerconsumelevel=0
+    else
+        monitor.setTextColor(colors.white)
+    end
+    -- PWR text and remaining percentage
     monitor.setCursorPos(1, 1)
     monitor.write("PWR")
     monitor.setCursorPos(5, 1)
-    monitor.write(tostring(math.floor(power / 100)).. "%")
+    monitor.write(tostring(math.floor(((power / initialPower) * 100) -1 )).. "%")
+    -- power usage level bar (=======)
     monitor.setCursorPos(1, 2)
-    for _, output in ipairs(Output.instances) do
-        if output.active then
+    for _, link in ipairs(Link.instances) do
+        if link.active and link.powerConsumption > 0 then
             powerconsumelevel = powerconsumelevel + 1
         end
     end
@@ -158,25 +374,25 @@ local function drawScreen()
         monitor.blit(string.rep("=", powerconsumelevel), powerlvlcolors[powerconsumelevel], string.rep("f", powerconsumelevel))
     end
     powerconsumelevel = 0
+    -- draw buttons on the monitor (if there are buttons)
     Button:drawButtons()
-    if power <= 0 then
-        monitor.setTextColor(colors.red)
-        powerconsumelevel=0
-    else
-        monitor.setTextColor(colors.white)
-    end
 end
 
-local debounce = false
+local debounce6AM = false
 local function mainLoop()
     while true do
         handlePower()
-        if os.time() == 6 and debounce == false then
-            debounce = true
-            celebrate6AM()
+        if os.time() == 6 and debounce6AM == false then
+            debounce6AM = true
+            if do6AMCelebration then
+                celebrate6AM()
+            end
+            if resetPowerAt6AM then
+                power = 9999
+            end
         end
-        if os.time() == 0 and debounce == true then
-            debounce = false
+        if os.time() > 6 and debounce6AM == true then
+            debounce6AM = false
         end
         drawScreen()
         sleep(0.05)
@@ -184,35 +400,6 @@ local function mainLoop()
     end
 end
 
---############################################ EDIT HERE ############################################
-
---BUTTON FORMAT:
--- local button = Button:new( button X coordinate, button Y coordinate, X coordinate text offset, Y coordinate text offset, width, height, text )
--- coordinates are from the top left of the monitor screen, where 1,1 is the very top left pixel, a 1x1 block monitor has a 7x7 pixel screen.
--- text offset offsets the button text from the top left of the button, 0 means no offset, you can use offset to put text in the
--- middle of a button in case you have a bigger button.
--- width and height are the width and height of the button.
--- text is the text that shows up on the button, leave empty for no text.
-
-local doorButton = Button:new(1,3,0,0,3,1,"DOR")
-local lightButton = Button:new(5,3,0,0,3,1,"LIT")
-local ventButton = Button:new(1,4,0,0,3,1,"VNT")
-
---OUTPUT FORMAT: 
--- local output = Output:new( side, power consumption, initial activity state, linked button )
--- side is the side of the computer block or redstone relay which redstone signal will be outputted to, the computer screen is the front.
--- powerconsumption is how much power this output consumes, more means more power consumed, sides can be "front","back","right","left","top","bottom".
--- initial activity state is whether the output will be on or off initially, for example poweroutput is supposed to be
--- on for as long as there is power, so it should initially be true, I use poweroutput to keep the office lights on while power is working and turn off when
--- power goes out.
--- linked button is the button which controls the output, leave empty for no button.
-
-local doorOutput = Output:new("front", 10, false, doorButton)
-local lightOutput = Output:new("bottom", 10, false, lightButton)
-local ventOutput = Output:new("right", 10, false, ventButton)
-local powerOutput = Output:new("left", 1 , true)
-
---#################################################################################################
--- script by defaulito
-
 parallel.waitForAny(mainLoop, handleInput)
+
+-- script by defaulito
