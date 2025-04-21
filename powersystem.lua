@@ -2,18 +2,18 @@
 local monitor = peripheral.find("monitor")
 local speaker = peripheral.find("speaker") or nil
 local doSetup = false
-local configPath = "config.lua" -- where to save config after setting up, only edit if you need to
+local configPath = "config.lua" -- where to save and load config, only edit if you need to
 --CONFIG VARIABLES
 local fullPowerDuringDay = false
 local do6AMCelebration = false
 local resetPowerAt6AM = false
-local initialPower = 9999
+local initialPower
 --
 term.clear()
 term.setCursorPos(1,1)
 monitor.setBackgroundColor(colors.black)
 monitor.clear()
---on-monitor buttons
+--on-monitor buttons --NOTE: not currently used, functionality will be added back in the future probably...
 local Button = {} --button class, Yes, object oriented programming in lua, lets gooo
 Button.__index = Button
 Button.instances = {}
@@ -100,6 +100,8 @@ end
 local function setup()
     local userInput
     print("INITIAL SETUP")
+    print("\nWhat is the initial power value?\n | Any positive number |")
+    initialPower = tonumber(read())
     print("\nDo you want power to automatically reset at 6AM?\n | Yes | No |")
     userInput = read()
     if userInput:upper() == "YES" then
@@ -117,25 +119,23 @@ local function setup()
         print("\nPower won't reset automatically at 6AM and power won't stay full during day, keep in mind that you will need to add a generator in order to recharge power")
         sleep(1)
     end
-    print("\nDo you want the monitor to announce when time hits 6AM?\n | Yes | No |")
+    print("\nDo you want the monitor to announce when time hits 6AM with a little animation?\n | Yes | No |")
     userInput = read()
     if userInput:upper() == "YES" then
         do6AMCelebration = true
     elseif userInput:upper() == "NO" then
     end
     sleep(1)
-
+    --device connection
     doSetup = true
     local event, p1, p2, p3
     while doSetup do
         print("\nConnecting a new device...")
         print("\nWaiting for a relay...\n | (D)one to exit setup |")
-         event, p1, p2, p3 = os.pullEvent()
-        if event == "key" then
-            if keys.getName(p1):upper() == "D" then
-                print("Done")
-                doSetup = false
-            end
+        event, p1, p2, p3 = os.pullEvent()
+        if event == "key" and keys.getName(p1):upper() == "D" then
+            print("Done")
+            doSetup = false
         elseif event == "peripheral" then
             local mainRelay = peripheral.wrap(p1)
             print("\nRelay attached, what did you connect?\n | Lever | Lights | Generator |")
@@ -148,19 +148,17 @@ local function setup()
                 while connectingTargets do
                     print("\nWaiting for a relay...\n | (D)one to finish |")
                      event, p1, p2, p3 = os.pullEvent()
-                    if event == "key" then
-                        if keys.getName(p1):upper() == "D" then
-                            print("Done")
-                            connectingTargets = false
-                        end
+                    if event == "key" and keys.getName(p1):upper() == "D" then
+                        print("Done")
+                        connectingTargets = false
                     elseif event == "peripheral" then
                         print("\nYou attached a target")
                         table.insert(connectedTargets, peripheral.wrap(p1))
                     end
                 end
-                print("\nHow much power will it consume per in-game tick? 1 second = 20 in-game ticks")
+                print("\nHow much power will it consume per second of being active?\n | Positive number or 0 for no consumption |")
                 sleep(1)
-                local powerConsumption = tonumber(read())
+                local powerConsumption = tonumber(read())/20
                 Link:new(mainRelay, connectedTargets or nil, powerConsumption, false)
                 print("\nYou added a new lever and its " .. #connectedTargets .. " target(s)")
                 sleep(1)
@@ -175,11 +173,9 @@ local function setup()
                     while connectingTargets do
                         print("\nWaiting for a relay...\n | (D)one |")
                         event, p1, p2, p3 = os.pullEvent()
-                        if event == "key" then
-                            if keys.getName(p1):upper() == "D" then
-                                print("Done")
-                                connectingTargets = false
-                            end
+                        if event == "key" and keys.getName(p1):upper() == "D" then
+                            print("Done")
+                            connectingTargets = false
                         elseif event == "peripheral" then
                             print("\nYou attached a light")
                             table.insert(connectedTargets, peripheral.wrap(p1))
@@ -189,8 +185,8 @@ local function setup()
                 end
                 table.insert(connectedTargets, mainRelay)
                 sleep(1)
-                print("\nHow much power will it consume per in-game tick? 1 second = 20 in-game ticks")
-                local powerConsumption = tonumber(read())
+                print("\nHow much power will it consume per second of being active?\n | Positive number or 0 for no consumption |")
+                local powerConsumption = tonumber(read())/20
                 sleep(1)
                 Link:new(nil, connectedTargets, powerConsumption, true)
                 print("\nYou added " .. #connectedTargets .. " light(s)")
@@ -198,9 +194,9 @@ local function setup()
             elseif userInput:upper() == "GENERATOR" then
                 print("You connected a generator\n")
                 sleep(1)
-                print("How much power will it generate per in-game tick? 1 second = 20 in-game ticks")
+                print("How much power will it generate per second of being active?\n | Positive number |")
                 sleep(1)
-                local powerConsumption = -tonumber(read())
+                local powerConsumption = -tonumber(read())/20
                 sleep(1)
                 Link:new(mainRelay, nil , powerConsumption, false)
                 print("You added a new generator")
@@ -213,6 +209,7 @@ local function setup()
     config.resetPowerAt6AM = resetPowerAt6AM
     config.fullPowerDuringDay = fullPowerDuringDay
     config.do6AMCelebration = do6AMCelebration
+    config.initialPower = initialPower
     config.links = {}
     for _, link in ipairs(Link.instances) do
         local currentLink = {}
@@ -234,8 +231,11 @@ local function setup()
     local file = fs.open(configPath, "w")
     file.write("return " .. textutils.serialize(config))
     file.close()
-    print("Config saved to " .. configPath)
-    print("\nSetup is done, you will not need to set up again\nif you wish to reset then delete " .. configPath, ", either by stopping the code and running the delete command or going to (this world's save folder)/computercraft/computer/(computer id)")
+    print("\nConfig saved to "..configPath)
+    print("\nSetup is done, you will not need to set up again\n\nif you wish to reset then delete "..configPath..", either by stopping the code and running the delete command or by going to\n(this world's save folder)/computercraft/computer/"..os.getComputerID())
+    if monitor == nil then
+        monitor = peripheral.find("monitor")
+    end
 end
 -- loading config
 local function loadConfig()
@@ -243,6 +243,7 @@ local function loadConfig()
     resetPowerAt6AM = config.resetPowerAt6AM
     fullPowerDuringDay = config.fullPowerDuringDay
     do6AMCelebration = config.do6AMCelebration
+    initialPower = config.initialPower
     for _, link in ipairs(config.links) do
         local parentRelay = nil
         if link.parentRelay ~= nil then
@@ -257,7 +258,7 @@ local function loadConfig()
         end
         Link:new(parentRelay, childRelays, link.powerConsumption, link.initialActivity)
     end
-    print("\nLoaded config from " .. configPath .. "\nif you wish to reset setup then delete " .. configPath .. ", either by stopping the code and running the delete command or going to (this world's save folder)/computercraft/computer/(computer id)")
+    print("Loaded config from "..configPath.."\n\nif you wish to reset setup then delete "..configPath..", either by stopping the code and running the delete command or by going to\n(this world's save folder)/computercraft/computer/"..os.getComputerID())
 end
 --check if config file exists, if it does, load it, if it doesn't, then start setup
 if fs.exists(configPath) then
@@ -354,7 +355,7 @@ local function drawScreen()
     monitor.write("PWR")
     monitor.setCursorPos(5, 1)
     if power > 0 then
-        monitor.write(tostring(math.ceil(((power / initialPower) * 100) -1 )).. "%")
+        monitor.write(tostring(math.ceil(((power/initialPower)*100)-1)).."%")
     else
         monitor.write("0%")
     end
@@ -394,6 +395,6 @@ local function mainLoop()
         monitor.clear()
     end
 end
-
+-- running mainLoop and handleInput in parallel to avoid freezing of the monitor
 parallel.waitForAny(mainLoop, handleInput)
 -- script by defaulito
