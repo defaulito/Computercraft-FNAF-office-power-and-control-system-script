@@ -2,7 +2,7 @@
 local monitor = peripheral.find("monitor")
 local speaker = peripheral.find("speaker") or nil
 local doSetup = false
-local configPath = "config.lua" -- where to save and load config, only edit if you need to
+local configPath = "config.lua" --where to save and load config, only edit if you need to
 --CONFIG VARIABLES
 local fullPowerDuringDay = false
 local do6AMCelebration = false
@@ -22,7 +22,6 @@ function Button:new(x, y, xTOff, yTOff, width, height, text)
         assert(#text + xTOff <= width, "text is wider than the button, consider using acronyms (ex: DOR for door), or decreasing x text offset if present")
         assert(yTOff < height, "y text offset is too large, decrease or remove it")
     end
-
     local obj = {x = x, y = y, xTOff=xTOff, yTOff=yTOff, width = width, height = height, active = false, text = text or nil}
     setmetatable(obj, self)
     table.insert(self.instances, obj)
@@ -58,11 +57,6 @@ end
 function Button:drawButtons()
     for _, button in ipairs(Button.instances) do
         button:draw()
-    end
-end
-local function handleInput()
-    while true do
-        Button:awaitClick()
     end
 end
 --a "link" is just a fancy name in the code for devices and their levers or whatever controls them
@@ -160,7 +154,7 @@ local function setup()
                 sleep(1)
                 local powerConsumption = tonumber(read())/20
                 Link:new(mainRelay, connectedTargets or nil, powerConsumption, false)
-                print("\nYou added a new lever and its " .. #connectedTargets .. " target(s)")
+                print("\nYou added a new lever and its "..#connectedTargets.." target(s)")
                 sleep(1)
             elseif userInput:upper() == "LIGHTS" then
                 local connectedTargets = {}
@@ -189,7 +183,7 @@ local function setup()
                 local powerConsumption = tonumber(read())/20
                 sleep(1)
                 Link:new(nil, connectedTargets, powerConsumption, true)
-                print("\nYou added " .. #connectedTargets .. " light(s)")
+                print("\nYou added "..#connectedTargets.." light(s)")
                 sleep(1)
             elseif userInput:upper() == "GENERATOR" then
                 print("You connected a generator\n")
@@ -237,7 +231,7 @@ local function setup()
         monitor = peripheral.find("monitor")
     end
 end
--- loading config
+--loading config
 local function loadConfig()
     local config = dofile(configPath)
     resetPowerAt6AM = config.resetPowerAt6AM
@@ -268,26 +262,23 @@ end
 --handling power
 local power = initialPower
 local function handlePower()
+    --handling power consumption for devices
     if power > 0 then
         for _, link in ipairs(Link.instances) do
             if link.parentRelay ~= nil and link.childRelays ~= nil then
-                link.active = link:getParentRelayState()
                 if link.active then
                     power = power - link.powerConsumption
                 end
             elseif link.parentRelay == nil then
-                link.active = link.initialActivity
                 power = power - link.powerConsumption
             elseif link.childRelays == nil then
-                link.active = link:getParentRelayState()
                 if link.active then
                     power = power - link.powerConsumption
                 end
             end
         end
     end
-    Link.updateChildRelayStates()
-
+    --handling power outage and edge cases
     if power > initialPower then
         power = initialPower
     end
@@ -311,6 +302,24 @@ local function handlePower()
     end
     if os.time() >= 6 and fullPowerDuringDay then
         power = initialPower
+    end
+end
+--handling input, from on-monitor buttons or physical levers/buttons
+local function handleInput()
+    while true do
+        Button:awaitClick()
+        if power > 0 then
+            for _, link in ipairs(Link.instances) do
+                if link.parentRelay ~= nil and link.childRelays ~= nil then
+                    link.active = link:getParentRelayState()
+                elseif link.parentRelay == nil then
+                    link.active = link.initialActivity
+                elseif link.childRelays == nil then
+                    link.active = link:getParentRelayState()
+                end
+            end
+        end
+        Link.updateChildRelayStates()
     end
 end
 --announcing 6AM on the monitor
@@ -341,16 +350,16 @@ local function celebrate6AM()
     monitor.clear()
 end
 --drawing monitor screen stuff
-local powerconsumelevel = 0
-local powerlvlcolors = { "d", "d4", "d44", "d444", "d444e", "d444ee", "d444eee" }
+local powerUsageLevel = 0
+local powerUsageBarColors = {"d", "d4", "d44", "d444", "d444e", "d444ee", "d444eee"}
 local function drawScreen()
     if power <= 0 then
         monitor.setTextColor(colors.red)
-        powerconsumelevel=0
+        powerUsageLevel=0
     else
         monitor.setTextColor(colors.white)
     end
-    -- PWR text and remaining percentage
+    --PWR text and remaining percentage
     monitor.setCursorPos(1, 1)
     monitor.write("PWR")
     monitor.setCursorPos(5, 1)
@@ -359,19 +368,21 @@ local function drawScreen()
     else
         monitor.write("0%")
     end
-    -- power usage level bar (=======)
+    --power usage level bar (=======)
     monitor.setCursorPos(1, 2)
     for _, link in ipairs(Link.instances) do
         if link.active and link.powerConsumption > 0 then
-            powerconsumelevel = powerconsumelevel + 1
+            powerUsageLevel = powerUsageLevel + 1
         end
     end
-    if powerconsumelevel > 0 then
-        monitor.blit(string.rep("=", powerconsumelevel), powerlvlcolors[powerconsumelevel], string.rep("f", powerconsumelevel))
+    if powerUsageLevel > 0 then
+        monitor.blit(string.rep("=", powerUsageLevel), powerUsageBarColors[powerUsageLevel], string.rep("f", powerUsageLevel))
     end
-    powerconsumelevel = 0
-    -- draw buttons on the monitor (if there are buttons)
-    Button:drawButtons()
+    powerUsageLevel = 0
+    --draw buttons on the monitor (if there are buttons)
+    if Button.instances ~= nil then
+        Button:drawButtons()
+    end
 end
 --where it all comes together
 local debounce6AM = false
@@ -391,10 +402,10 @@ local function mainLoop()
             debounce6AM = false
         end
         drawScreen()
-        sleep(0.05)
+        sleep(0.05) --executes once per tick
         monitor.clear()
     end
 end
--- running mainLoop and handleInput in parallel to avoid freezing of the monitor
+--running mainLoop and handleInput in parallel to avoid freezing of the monitor or freezing of input
 parallel.waitForAny(mainLoop, handleInput)
 -- script by defaulito
