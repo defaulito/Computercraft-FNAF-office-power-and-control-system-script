@@ -1,8 +1,9 @@
 -- script by defaulito
 local monitor = peripheral.find("monitor")
-local speaker = peripheral.find("speaker") or nil
-local doSetup = false
+local speaker = peripheral.find("speaker")
 local configPath = "config.lua" --where to save and load config, only edit if you need to
+local debounce6AM = false
+local debounceCelebration = false
 --CONFIG VARIABLES
 local fullPowerDuringDay = false
 local do6AMCelebration = false
@@ -11,18 +12,23 @@ local initialPower
 --
 term.clear()
 term.setCursorPos(1,1)
-monitor.setBackgroundColor(colors.black)
-monitor.clear()
---on-monitor buttons --NOTE: not currently used, functionality will be added back in the future probably...
-local Button = {} --button class, Yes, object oriented programming in lua, lets gooo
+if monitor ~= nil then
+    monitor.setBackgroundColor(colors.black)
+    monitor.clear()
+else
+    print("ERROR: Monitor not detected, make sure a monitor is present, and make sure that the wired relays on the sides of both the computer and the monitor are activated, then restart the computer")
+    os.exit(false)
+end
+--on-monitor buttons --NOTE: not currently used, functionality will be added in the future probably...
+local Button = {} --button class
 Button.__index = Button
 Button.instances = {}
 function Button:new(x, y, xTOff, yTOff, width, height, text)
     if text ~= nil then
-        assert(#text + xTOff <= width, "text is wider than the button, consider using acronyms (ex: DOR for door), or decreasing x text offset if present")
-        assert(yTOff < height, "y text offset is too large, decrease or remove it")
+        assert(#text + xTOff <= width, "Text is wider than the button, consider using acronyms (ex: DOR for door), or decreasing X text offset if present")
+        assert(yTOff < height, "Y text offset is too large, decrease or remove it")
     end
-    local obj = {x = x, y = y, xTOff=xTOff, yTOff=yTOff, width = width, height = height, active = false, text = text or nil}
+    local obj = {x = x, y = y, xTOff = xTOff, yTOff = yTOff, width = width, height = height, active = false, text = text or nil}
     setmetatable(obj, self)
     table.insert(self.instances, obj)
     return obj
@@ -54,7 +60,7 @@ function Button:awaitClick()
         end
     end
 end
-function Button:drawButtons()
+function Button:drawAllButtons()
     for _, button in ipairs(Button.instances) do
         button:draw()
     end
@@ -90,6 +96,13 @@ function Link.updateChildRelayStates()
         end
     end
 end
+function Link.isGeneratorOn()
+    for _, link in ipairs(Link.instances) do
+        if link.powerConsumption < 0 and link.active then
+            return true
+        end
+    end
+end
 --setup function
 local function setup()
     local userInput
@@ -119,9 +132,14 @@ local function setup()
         do6AMCelebration = true
     elseif userInput:upper() == "NO" then
     end
+    if do6AMCelebration == true and speaker ~= nil then
+        sleep(1)
+        print("\nSpeaker detected, when time hits 6AM, a chime will play")
+        sleep(1)
+    end
     sleep(1)
     --device connection
-    doSetup = true
+    local doSetup = true
     local event, p1, p2, p3
     while doSetup do
         print("\nConnecting a new device...")
@@ -255,8 +273,7 @@ local function loadConfig()
     print("Loaded config from "..configPath.."\n\nif you wish to reset setup then delete "..configPath..", either by stopping the code and running the delete command or by going to\n(this world's save folder)/computercraft/computer/"..os.getComputerID())
 end
 --check if config file exists, if it does, load it, if it doesn't, then start setup
-if fs.exists(configPath) then
-    loadConfig()
+if fs.exists(configPath) then loadConfig()
 else setup()
 end
 --handling power
@@ -279,8 +296,7 @@ local function handlePower()
         end
     end
     --handling power outage and edge cases
-    if power > initialPower then
-        power = initialPower
+    if power > initialPower then power = initialPower
     end
     if power <= 0 then
         power = 0
@@ -307,7 +323,9 @@ end
 --handling input, from on-monitor buttons or physical levers/buttons
 local function handleInput()
     while true do
-        Button:awaitClick()
+        if Button.instances ~= nil then
+            Button:awaitClick()
+        end
         if power > 0 then
             for _, link in ipairs(Link.instances) do
                 if link.parentRelay ~= nil and link.childRelays ~= nil then
@@ -320,10 +338,27 @@ local function handleInput()
             end
         end
         Link.updateChildRelayStates()
+        sleep(0.05) --remove or decrease when you add buttons back
+    end
+end
+--6AM chime
+local function playChime() --the westminster clock chime
+    local instrument = "bell"
+    local volume = 1
+    local delay = 0.8
+    for _, note in ipairs({6, 10, 8, 1}) do --first half
+        speaker.playNote(instrument, volume, note)
+        sleep(delay)
+    end
+    sleep(delay*2/3)
+    for _, note in ipairs({6, 8, 10, 6}) do --second half
+        speaker.playNote(instrument, volume, note)
+        sleep(delay)
     end
 end
 --announcing 6AM on the monitor
 local function celebrate6AM()
+    monitor.clear()
     monitor.setTextColor(colors.white)
     monitor.setCursorPos(3, 1)
     monitor.write("5AM")
@@ -333,7 +368,10 @@ local function celebrate6AM()
     monitor.setBackgroundColor(colors.blue)
     monitor.clear()
     monitor.write("6AM")
-    sleep(0.4)
+    if speaker ~= nil then
+        playChime()
+    else sleep(0.4)
+    end
     monitor.setCursorPos(1, 2)
     monitor.write("Your")
     sleep(0.4)
@@ -351,61 +389,93 @@ local function celebrate6AM()
 end
 --drawing monitor screen stuff
 local powerUsageLevel = 0
-local powerUsageBarColors = {"d", "d4", "d44", "d444", "d444e", "d444ee", "d444eee"}
-local function drawScreen()
-    if power <= 0 then
-        monitor.setTextColor(colors.red)
-        powerUsageLevel=0
-    else
-        monitor.setTextColor(colors.white)
-    end
-    --PWR text and remaining percentage
-    monitor.setCursorPos(1, 1)
-    monitor.write("PWR")
-    monitor.setCursorPos(5, 1)
-    if power > 0 then
-        monitor.write(tostring(math.ceil(((power/initialPower)*100)-1)).."%")
-    else
-        monitor.write("0%")
-    end
-    --power usage level bar (=======)
-    monitor.setCursorPos(1, 2)
-    for _, link in ipairs(Link.instances) do
-        if link.active and link.powerConsumption > 0 then
-            powerUsageLevel = powerUsageLevel + 1
-        end
-    end
-    if powerUsageLevel > 0 then
-        monitor.blit(string.rep("=", powerUsageLevel), powerUsageBarColors[powerUsageLevel], string.rep("f", powerUsageLevel))
-    end
-    powerUsageLevel = 0
-    --draw buttons on the monitor (if there are buttons)
-    if Button.instances ~= nil then
-        Button:drawButtons()
-    end
+local powerUsageBarColors
+if monitor.isColor() then
+    powerUsageBarColors = {"d", "d4", "d44", "d44e", "d44ee", "d44eee", "d44eeee"}
+else
+    powerUsageBarColors = {"d", "d8", "d88", "d886", "d8866", "d88666", "d886666"}
 end
---where it all comes together
-local debounce6AM = false
-local function mainLoop()
+local function drawScreen()
     while true do
-        handlePower()
-        if os.time() == 6 and debounce6AM == false then
-            debounce6AM = true
+        if power <= 0 then
+            monitor.setTextColor(colors.red)
+            powerUsageLevel=0
+        else
+            monitor.setTextColor(colors.white)
+        end
+        if math.floor(os.time()) == 6 and debounceCelebration == false then
             if do6AMCelebration then
                 celebrate6AM()
-            end
-            if resetPowerAt6AM then
-                power = initialPower
+                debounceCelebration = true
             end
         end
-        if os.time() > 6 and debounce6AM == true then
-            debounce6AM = false
+        --PWR text and remaining percentage
+        monitor.setCursorPos(1, 1)
+        monitor.write("PWR")
+        monitor.setCursorPos(5, 1)
+        if power > 0 then
+            monitor.write(tostring(math.ceil(((power/initialPower)*100)-1)).."%")
+        else
+            monitor.write("0%")
         end
-        drawScreen()
-        sleep(0.05) --executes once per tick
+        --power usage level bar (=======)
+        monitor.setCursorPos(1, 2)
+        for _, link in ipairs(Link.instances) do
+            if link.active and link.powerConsumption > 0 then
+                powerUsageLevel = powerUsageLevel + 1
+            end
+            if powerUsageLevel > 7 then powerUsageLevel = 7
+            end
+        end
+        if powerUsageLevel > 0 then
+            monitor.blit(string.rep("=", powerUsageLevel), powerUsageBarColors[powerUsageLevel], string.rep("f", powerUsageLevel))
+        end
+        powerUsageLevel = 0
+        --time
+        local time = math.floor(os.time())
+        monitor.setCursorPos(1, 5)
+        if time <= 12 and time > 0 then
+            monitor.write(time.."AM")
+        elseif time > 12 then
+            monitor.write((time-12).."PM")
+        else
+            monitor.write("12PM")
+        end
+        --generator indicator
+        if Link.isGeneratorOn() then
+            monitor.setCursorPos(7,5)
+            monitor.blit("+","d","f")
+        end
+        --draw buttons on the monitor (if there are buttons)
+        if Button.instances ~= nil then
+            Button:drawAllButtons()
+        end
+        sleep(0.3)
         monitor.clear()
     end
 end
---running mainLoop and handleInput in parallel to avoid freezing of the monitor or freezing of input
-parallel.waitForAny(mainLoop, handleInput)
+--where it all comes together
+local function mainLoop()
+    while true do
+        handlePower()
+        local currentTime = os.time()
+        if currentTime == 6 and not debounce6AM then
+            debounce6AM = true
+            if resetPowerAt6AM then
+                power = initialPower
+            end
+            if do6AMCelebration then
+                debounceCelebration = false
+            end
+        elseif currentTime > 6 and debounce6AM then
+            debounce6AM = false
+        end
+        sleep(0.05) --executes once per tick
+    end
+end
+--running mainLoop,handleInput and drawScreen in parallel
+parallel.waitForAny(mainLoop, handleInput, drawScreen)
 -- script by defaulito
+
+--TODO:
+-- improve setup wizard
