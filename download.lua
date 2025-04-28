@@ -9,7 +9,7 @@ end
 if fs.exists("startup.lua") then
     shell.run("delete startup.lua")
     shell.run("wget https://raw.githubusercontent.com/defaulito/Computercraft-FNAF-office-power-and-control-system-script/main/startup.lua")
-    print("\nUpdated powersystem.lua")
+    print("\nUpdated startup.lua")
 else
     shell.run("wget https://raw.githubusercontent.com/defaulito/Computercraft-FNAF-office-power-and-control-system-script/main/startup.lua")
     print("\nDownloaded startup.lua")
