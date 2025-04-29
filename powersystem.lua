@@ -1,5 +1,5 @@
 -- script by defaulito
-local monitor = peripheral.find("monitor")
+local monitors = {peripheral.find("monitor")}
 local speaker = peripheral.find("speaker")
 local configPath = "config.lua" --where to save and load config, only edit if you need to
 local debounce6AM = false
@@ -12,11 +12,13 @@ local initialPower
 --
 term.clear()
 term.setCursorPos(1,1)
-if monitor ~= nil then
-    monitor.setBackgroundColor(colors.black)
-    monitor.clear()
+if monitors ~= nil then
+    for _, monitor in ipairs(monitors) do
+        monitor.setBackgroundColor(colors.black)
+        monitor.clear()
+    end
 else
-    print("ERROR: Monitor not detected, make sure a monitor is present, and make sure that the wired relays on the sides of both the computer and the monitor are activated, then restart the computer")
+    print("ERROR: Monitor not detected, make sure a monitor is present, and make sure that the wired modems on the sides of both the computer and the monitor are activated, then restart the computer")
     os.exit(false)
 end
 --on-monitor buttons --NOTE: not currently used, functionality will be added in the future probably...
@@ -33,7 +35,7 @@ function Button:new(x, y, xTOff, yTOff, width, height, text)
     table.insert(self.instances, obj)
     return obj
 end
-function Button:draw()
+function Button:draw(monitor)
     local bgcolor
     if self.active then bgcolor = "d"
     else bgcolor = "e"
@@ -241,13 +243,10 @@ local function setup()
         table.insert(config.links, currentLink)
     end
     local file = fs.open(configPath, "w")
-    file.write("return " .. textutils.serialize(config))
+    file.write("return " ..textutils.serialize(config))
     file.close()
     print("\nConfig saved to "..configPath)
     print("\nSetup is done, you will not need to set up again\n\nif you wish to reset then delete "..configPath..", either by stopping the code and running the delete command or by going to\n(this world's save folder)/computercraft/computer/"..os.getComputerID())
-    if monitor == nil then
-        monitor = peripheral.find("monitor")
-    end
 end
 --loading config
 local function loadConfig()
@@ -357,7 +356,7 @@ local function playChime() --the westminster clock chime
     end
 end
 --announcing 6AM on the monitor
-local function celebrate6AM()
+local function announce6AM(monitor)
     monitor.clear()
     monitor.setTextColor(colors.white)
     monitor.setCursorPos(3, 1)
@@ -368,10 +367,7 @@ local function celebrate6AM()
     monitor.setBackgroundColor(colors.blue)
     monitor.clear()
     monitor.write("6AM")
-    if speaker ~= nil then
-        playChime()
-    else sleep(0.4)
-    end
+    sleep(0.4)
     monitor.setCursorPos(1, 2)
     monitor.write("Your")
     sleep(0.4)
@@ -389,69 +385,74 @@ local function celebrate6AM()
 end
 --drawing monitor screen stuff
 local powerUsageLevel = 0
-local powerUsageBarColors
-if monitor.isColor() then
-    powerUsageBarColors = {"d", "d4", "d44", "d44e", "d44ee", "d44eee", "d44eeee"}
-else
-    powerUsageBarColors = {"d", "d8", "d88", "d886", "d8866", "d88666", "d886666"}
-end
-local function drawScreen()
-    while true do
-        if power <= 0 then
-            monitor.setTextColor(colors.red)
-            powerUsageLevel=0
-        else
-            monitor.setTextColor(colors.white)
+local powerUsageBarColors = {}
+local function drawScreen(monitor)
+    if power <= 0 then
+        monitor.setTextColor(colors.red)
+        powerUsageLevel=0
+    else
+        monitor.setTextColor(colors.white)
+    end
+    --PWR text and remaining percentage
+    monitor.setCursorPos(1, 1)
+    monitor.write("PWR")
+    monitor.setCursorPos(5, 1)
+    if power > 0 then
+        monitor.write(tostring(math.ceil(((power/initialPower)*100)-1)).."%")
+    else
+        monitor.write("0%")
+    end
+    --power usage level bar (=======)
+    if monitor.isColor() then
+        powerUsageBarColors = {"d", "d4", "d44", "d44e", "d44ee", "d44eee", "d44eeee"}
+    else
+        powerUsageBarColors = {"d", "d8", "d88", "d886", "d8866", "d88666", "d886666"}
+    end
+    monitor.setCursorPos(1, 2)
+    for _, link in ipairs(Link.instances) do
+        if link.active and link.powerConsumption > 0 then
+            powerUsageLevel = powerUsageLevel + 1
         end
+        if powerUsageLevel > 7 then powerUsageLevel = 7
+        end
+    end
+    if powerUsageLevel > 0 then
+        monitor.blit(string.rep("=", powerUsageLevel), powerUsageBarColors[powerUsageLevel], string.rep("f", powerUsageLevel))
+    end
+    powerUsageLevel = 0
+    --time
+    local time = math.floor(os.time())
+    monitor.setCursorPos(1, 5)
+    if time <= 12 and time > 0 then
+        monitor.write(time.."AM")
+    elseif time > 12 then
+        monitor.write((time-12).."PM")
+    else
+        monitor.write("12PM")
+    end
+    --generator indicator
+    if Link.isGeneratorOn() then
+        monitor.setCursorPos(7,5)
+        monitor.blit("+","d","f")
+    end
+end
+local function updateAllMonitors()
+    while true do
         if math.floor(os.time()) == 6 and debounceCelebration == false then
             if do6AMCelebration then
-                celebrate6AM()
+                for _, monitor in ipairs(monitors) do
+                    announce6AM(monitor)
+                end
                 debounceCelebration = true
             end
         end
-        --PWR text and remaining percentage
-        monitor.setCursorPos(1, 1)
-        monitor.write("PWR")
-        monitor.setCursorPos(5, 1)
-        if power > 0 then
-            monitor.write(tostring(math.ceil(((power/initialPower)*100)-1)).."%")
-        else
-            monitor.write("0%")
-        end
-        --power usage level bar (=======)
-        monitor.setCursorPos(1, 2)
-        for _, link in ipairs(Link.instances) do
-            if link.active and link.powerConsumption > 0 then
-                powerUsageLevel = powerUsageLevel + 1
-            end
-            if powerUsageLevel > 7 then powerUsageLevel = 7
-            end
-        end
-        if powerUsageLevel > 0 then
-            monitor.blit(string.rep("=", powerUsageLevel), powerUsageBarColors[powerUsageLevel], string.rep("f", powerUsageLevel))
-        end
-        powerUsageLevel = 0
-        --time
-        local time = math.floor(os.time())
-        monitor.setCursorPos(1, 5)
-        if time <= 12 and time > 0 then
-            monitor.write(time.."AM")
-        elseif time > 12 then
-            monitor.write((time-12).."PM")
-        else
-            monitor.write("12PM")
-        end
-        --generator indicator
-        if Link.isGeneratorOn() then
-            monitor.setCursorPos(7,5)
-            monitor.blit("+","d","f")
-        end
-        --draw buttons on the monitor (if there are buttons)
-        if Button.instances ~= nil then
-            Button:drawAllButtons()
+        for _, monitor in ipairs(monitors) do
+            drawScreen(monitor)
         end
         sleep(0.3)
-        monitor.clear()
+        for _, monitor in ipairs(monitors) do
+            monitor.clear()
+        end
     end
 end
 --where it all comes together
@@ -473,8 +474,8 @@ local function mainLoop()
         sleep(0.05) --executes once per tick
     end
 end
---running mainLoop,handleInput and drawScreen in parallel
-parallel.waitForAny(mainLoop, handleInput, drawScreen)
+--running mainLoop, handleInput and updateAllMonitors in parallel
+parallel.waitForAny(mainLoop, handleInput, updateAllMonitors)
 -- script by defaulito
 
 --TODO:
